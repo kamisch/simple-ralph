@@ -1,0 +1,51 @@
+[
+  {
+    "id": "task-1",
+    "description": "Set up project structure with TypeScript configuration",
+    "passes": true,
+    "priority": 1,
+    "context": "Initialize a basic TypeScript project with tsconfig.json, package.json, and necessary dependencies."
+  },
+  {
+    "id": "task-2",
+    "description": "Implement core Task class with JSON serialization",
+    "passes": false,
+    "priority": 2,
+    "context": "Create a Task class that can represent a task with id, description, passes flag, and optional context. Should support JSON serialization/deserialization."
+  },
+  {
+    "id": "task-3",
+    "description": "Build PRD manager to read and update prd.json",
+    "passes": false,
+    "priority": 3,
+    "context": "Create a PRDManager class that can read tasks from prd.json, find incomplete tasks, and update task status."
+  },
+  {
+    "id": "task-4",
+    "description": "Add progress logger with append functionality",
+    "passes": false,
+    "priority": 4,
+    "context": "Implement a ProgressLogger that can append formatted entries to progress.txt with timestamps and task details."
+  },
+  {
+    "id": "task-5",
+    "description": "Implement verification runner for typecheck and tests",
+    "passes": false,
+    "priority": 5,
+    "context": "Create a Verifier class that can run TypeScript type checking and tests, returning success/failure status."
+  },
+  {
+    "id": "task-6",
+    "description": "Write unit tests for Task and PRDManager",
+    "passes": false,
+    "priority": 6,
+    "context": "Add comprehensive unit tests using a testing framework like Jest or Vitest. Ensure all core functionality is tested."
+  },
+  {
+    "id": "task-7",
+    "description": "Add README documentation with usage examples",
+    "passes": false,
+    "priority": 7,
+    "context": "Create clear documentation explaining the Ralph Wiggum technique, how to run the script, and how to structure tasks in prd.json."
+  }
+]
