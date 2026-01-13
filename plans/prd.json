@@ -23,7 +23,7 @@
   {
     "id": "task-4",
     "description": "Add progress logger with append functionality",
-    "passes": false,
+    "passes": true,
     "priority": 4,
     "context": "Implement a ProgressLogger that can append formatted entries to progress.txt with timestamps and task details."
   },
