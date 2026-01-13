@@ -44,7 +44,7 @@
   {
     "id": "task-7",
     "description": "Add README documentation with usage examples",
-    "passes": false,
+    "passes": true,
     "priority": 7,
     "context": "Create clear documentation explaining the Ralph Wiggum technique, how to run the script, and how to structure tasks in prd.json."
   }
