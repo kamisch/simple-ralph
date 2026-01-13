@@ -91,34 +91,94 @@ EOF
 verify_implementation() {
     log_info "Running verification checks..."
 
-    # TypeScript type checking (if package.json has typecheck script)
-    if [ -f "package.json" ] && jq -e '.scripts.typecheck' package.json > /dev/null 2>&1; then
-        log_info "Running TypeScript type check..."
-        if ! pnpm typecheck; then
-            log_error "TypeScript type check failed"
-            return 1
-        fi
-        log_success "TypeScript type check passed"
-    fi
-
-    # Run tests (if package.json has test script)
-    if [ -f "package.json" ] && jq -e '.scripts.test' package.json > /dev/null 2>&1; then
-        log_info "Running tests..."
-        if ! pnpm test; then
-            log_error "Tests failed"
-            return 1
-        fi
-        log_success "Tests passed"
-    fi
-
-    # Linting (if package.json has lint script)
-    if [ -f "package.json" ] && jq -e '.scripts.lint' package.json > /dev/null 2>&1; then
-        log_info "Running linter..."
-        if ! pnpm lint; then
-            log_warning "Linting issues found (non-blocking)"
+    # 1. Custom Post-Hook Script (Highest Priority)
+    if [ -f "./ralph-post-hook.sh" ]; then
+        if [ -x "./ralph-post-hook.sh" ]; then
+            log_info "Found custom verification script: ./ralph-post-hook.sh"
+            if ! ./ralph-post-hook.sh; then
+                log_error "Custom verification script failed"
+                return 1
+            fi
+            log_success "Custom verification script passed"
+            return 0
         else
-            log_success "Linting passed"
+            log_warning "Found ./ralph-post-hook.sh but it is not executable. Skipped."
         fi
+    fi
+
+    local checks_run=0
+
+    # 2. auto-detection: Node.js
+    if [ -f "package.json" ]; then
+        log_info "Detected Node.js project"
+        # TypeScript type checking
+        if jq -e '.scripts.typecheck' package.json > /dev/null 2>&1; then
+            log_info "Running TypeScript type check..."
+            if ! pnpm typecheck; then
+                log_error "TypeScript type check failed"
+                return 1
+            fi
+            checks_run=$((checks_run + 1))
+        fi
+
+        # Tests
+        if jq -e '.scripts.test' package.json > /dev/null 2>&1; then
+            log_info "Running tests..."
+            if ! pnpm test; then
+                log_error "Tests failed"
+                return 1
+            fi
+            checks_run=$((checks_run + 1))
+        fi
+
+        # Linting
+        if jq -e '.scripts.lint' package.json > /dev/null 2>&1; then
+            log_info "Running linter..."
+            if ! pnpm lint; then
+                log_warning "Linting issues found (non-blocking)"
+            fi
+            checks_run=$((checks_run + 1))
+        fi
+    fi
+
+    # 3. auto-detection: Rust
+    if [ -f "Cargo.toml" ]; then
+        log_info "Detected Rust project"
+        
+        log_info "Running cargo test..."
+        if ! cargo test; then
+             log_error "Cargo tests failed"
+             return 1
+        fi
+        checks_run=$((checks_run + 1))
+
+        # Optional: check formatting
+        log_info "Checking formatting..."
+        if ! cargo fmt -- --check; then
+             log_warning "Formatting issues found (non-blocking)"
+        fi
+    fi
+
+    # 4. auto-detection: Python
+    if [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
+        log_info "Detected Python project"
+        
+        if command -v pytest &> /dev/null; then
+             log_info "Running pytest..."
+             if ! pytest; then
+                 log_error "Pytest failed"
+                 return 1
+             fi
+             checks_run=$((checks_run + 1))
+        else
+             log_warning "pytest not found, skipping python tests"
+        fi
+    fi
+
+    if [ "$checks_run" -eq 0 ]; then
+        log_warning "No verification checks were run (custom script missing and no known project structure detected)"
+    else
+        log_success "All verification checks passed"
     fi
 
     return 0

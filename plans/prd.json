@@ -9,7 +9,7 @@
   {
     "id": "task-2",
     "description": "Implement core Task class with JSON serialization",
-    "passes": false,
+    "passes": true,
     "priority": 2,
     "context": "Create a Task class that can represent a task with id, description, passes flag, and optional context. Should support JSON serialization/deserialization."
   },
