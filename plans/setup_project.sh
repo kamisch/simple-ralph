@@ -4,14 +4,14 @@ set -euo pipefail
 # setup_project.sh
 # Installs the Ralph framework into a target directory using templates from this script's directory
 
-IS_NEW_PROJECT=false
+SKIP_PRD_GENERATION=false
 TARGET_DIR="."
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --new)
-      IS_NEW_PROJECT=true
+    --no-generate)
+      SKIP_PRD_GENERATION=true
       shift # past argument
       ;;
     *)
@@ -59,7 +59,6 @@ create_template_prd() {
     "id": "task-1",
     "description": "Initial task",
     "passes": false,
-    "priority": 1,
     "context": "This is a placeholder task."
   }
 ]
@@ -71,7 +70,7 @@ EOF
 if [ -f "$TARGET_DIR/plans/prd.json" ]; then
     echo "⚠ plans/prd.json already exists, skipping"
 else
-    if [ "$IS_NEW_PROJECT" = true ]; then
+    if [ "$SKIP_PRD_GENERATION" = true ]; then
         create_template_prd
     else
         # Try to use Claude to generate PRD
@@ -204,7 +203,7 @@ EOFEXPECT
             echo "Solutions for PRD generation:"
             echo "  1. Manually edit plans/prd.json with your tasks (recommended)"
             echo "  2. Ensure Docker sandbox authentication: docker sandbox run claude, then /login"
-            echo "  3. Use --new flag for template PRD: simple-ralph --new <project>"
+            echo "  3. Use --no-generate flag for template PRD: simple-ralph --no-generate <project>"
             echo ""
             create_template_prd
         fi

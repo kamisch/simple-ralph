@@ -46,10 +46,18 @@ check_dependencies() {
     done
 }
 
-# Get the next incomplete task from PRD
-get_next_task() {
-    local task=$(jq -r '.[] | select(.passes == false) | @json' "$PRD_FILE" | head -1)
-    echo "$task"
+# Get all incomplete tasks as JSON array
+get_incomplete_tasks() {
+    jq '[.[] | select(.passes == false)]' "$PRD_FILE"
+}
+
+# Get the last 250 lines of progress.txt for context
+get_progress_context() {
+    if [ -f "$PROGRESS_FILE" ]; then
+        tail -n 250 "$PROGRESS_FILE"
+    else
+        echo "(no progress history yet)"
+    fi
 }
 
 # Count incomplete tasks
@@ -184,22 +192,58 @@ verify_implementation() {
     return 0
 }
 
-# Execute a single task
-# This is where the AI agent does the actual work
-execute_task() {
-    local task_json="$1"
-    local task_id=$(echo "$task_json" | jq -r '.id')
-    local task_desc=$(echo "$task_json" | jq -r '.description')
-    local task_context=$(echo "$task_json" | jq -r '.context // ""')
+# Execute a task cycle - agent selects and implements a task
+# Returns the completed task ID via stdout, or empty on failure
+execute_task_cycle() {
+    log_info "Gathering context for AI agent..."
 
-    log_info "Task ID: $task_id"
-    log_info "Description: $task_desc"
+    local incomplete_tasks=$(get_incomplete_tasks)
+    local progress_context=$(get_progress_context)
+    local task_count=$(echo "$incomplete_tasks" | jq 'length')
+
+    if [ "$task_count" -eq 0 ]; then
+        log_info "No incomplete tasks found."
+        echo ""  # Return empty
+        return 0
+    fi
+
+    log_info "Found $task_count incomplete task(s)"
+
+    # Build the full prompt for the agent
+    local prompt="You are an autonomous developer working on this project.
+
+## Your Backlog (Incomplete Tasks)
+Review these tasks and determine highest priority taskto work on next based on dependencies and context.
+
+\`\`\`json
+$incomplete_tasks
+\`\`\`
+
+## Recent Progress History
+Here is the recent work done on this project:
+
+\`\`\`
+$progress_context
+\`\`\`
+
+## Instructions
+1. Analyze the backlog and recent history.
+2. Determine the most logical next task based on:
+   - Dependencies between tasks (check context field)
+   - What has already been completed
+   - Logical ordering (foundational tasks before dependent ones)
+3. Implement that task completely.
+4. After you have successfully implemented and verified the task, you MUST output the following line EXACTLY:
+
+   COMPLETED_TASK_ID: <task-id>
+
+   For example: COMPLETED_TASK_ID: task-3
+
+This output is critical for the orchestration script to track progress."
 
     # ============================================================================
     # AI AGENT INVOCATION POINT
     # ============================================================================
-    # Run the task in the sandbox container
-    # Docker Desktop's 'docker sandbox' command handles authentication automatically
     log_info "Invoking AI agent via Docker sandbox..."
 
     # Check if docker sandbox command is available (Docker Desktop feature)
@@ -211,7 +255,6 @@ execute_task() {
     fi
 
     # Check if a sandbox exists for this workspace (for logging only)
-    # Docker sandbox run will automatically reuse existing sandboxes with their auth state
     local workspace_dir="$(pwd)"
     local existing_sandbox=$(docker sandbox ls | awk -v ws="$workspace_dir" 'NR > 1 && $4 == ws {print $1; exit}')
 
@@ -221,29 +264,32 @@ execute_task() {
         log_info "No existing sandbox found - will create new one for this workspace"
     fi
 
-    # Pass the task description to Claude via docker sandbox
-    # The sandbox runs in the current directory and can modify files
-    log_info "Task: $task_desc"
+    # Create a temporary file for the prompt (handles special characters safely)
+    local temp_prompt=$(mktemp)
+    printf '%s' "$prompt" > "$temp_prompt"
 
     # Create a temporary expect script to automate docker sandbox interaction
-    # Docker sandbox requires a TTY and runs interactively, so we use expect to automate it
     local temp_expect=$(mktemp)
-    cat > "$temp_expect" << EOFEXPECT
+    cat > "$temp_expect" << 'EOFEXPECT'
 #!/usr/bin/expect -f
-set timeout 300
-set task_desc [lindex \$argv 0]
+set timeout 600
+set prompt_file [lindex $argv 0]
+
+# Read prompt from file
+set fp [open $prompt_file r]
+set prompt_content [read $fp]
+close $fp
 
 # Spawn docker sandbox run claude with non-interactive flags
-spawn docker sandbox run claude --dangerously-skip-permissions -p "\$task_desc"
+spawn docker sandbox run claude --dangerously-skip-permissions -p $prompt_content
 
 # Wait for the command to complete
 expect {
     eof {
-        # Command finished
         exit 0
     }
     timeout {
-        puts "ERROR: Command timed out after 300 seconds"
+        puts "ERROR: Command timed out after 600 seconds"
         exit 1
     }
 }
@@ -251,15 +297,16 @@ EOFEXPECT
 
     chmod +x "$temp_expect"
 
-    # Execute the expect script with the task description
+    # Execute the expect script
     local exit_code=0
-    "$temp_expect" "$task_desc" 2>&1 | tee /tmp/ralph_claude_output.log || exit_code=$?
+    "$temp_expect" "$temp_prompt" 2>&1 | tee /tmp/ralph_claude_output.log || exit_code=$?
+
+    rm -f "$temp_expect" "$temp_prompt"
 
     if [ $exit_code -ne 0 ]; then
         log_error "AI Agent execution failed in Docker sandbox"
         log_error "Check /tmp/ralph_claude_output.log for details"
 
-        # Check if it's an authentication error
         if grep -q "Invalid API key" /tmp/ralph_claude_output.log; then
             log_error ""
             log_error "Authentication Error Detected!"
@@ -270,15 +317,21 @@ EOFEXPECT
             log_error "  4. After successful login, exit the session (Ctrl+D)"
             log_error "  5. Run ralph.sh again"
             log_error ""
-            log_error "Note: Authentication persists across sandbox sessions"
         fi
-
-        rm -f "$temp_expect"
         return 1
     fi
 
-    rm -f "$temp_expect"
-    log_success "Task completed successfully"
+    # Parse the completed task ID from the output
+    local completed_id=$(grep -oE 'COMPLETED_TASK_ID:[[:space:]]*[a-zA-Z0-9_-]+' /tmp/ralph_claude_output.log | tail -1 | sed 's/COMPLETED_TASK_ID:[[:space:]]*//')
+
+    if [ -z "$completed_id" ]; then
+        log_error "Agent did not report a COMPLETED_TASK_ID"
+        log_error "Check /tmp/ralph_claude_output.log for agent output"
+        return 1
+    fi
+
+    log_success "Agent reported completion of task: $completed_id"
+    echo "$completed_id"  # Return the task ID
     return 0
 }
 
@@ -334,28 +387,29 @@ main() {
         local remaining=$(count_incomplete_tasks)
         log_info "Remaining tasks: $remaining"
 
-        # Get next task
-        local task=$(get_next_task)
-
-        if [ -z "$task" ] || [ "$task" = "null" ]; then
+        if [ "$remaining" -eq 0 ]; then
             log_success "All tasks complete!"
             echo "$COMPLETION_SIGNAL"
             exit 0
         fi
 
-        local task_id=$(echo "$task" | jq -r '.id')
-        local task_desc=$(echo "$task" | jq -r '.description')
+        # Execute task cycle - agent selects and implements
+        log_info "Starting agentic task cycle..."
+        local completed_task_id
+        completed_task_id=$(execute_task_cycle)
+        local exec_status=$?
 
-        # Append progress header
-        append_progress "$iteration" "$task_id" "$task_desc"
-
-        # Execute the task (AI agent does the work)
-        log_info "Executing task..."
-        if ! execute_task "$task"; then
-            log_error "Task execution failed"
-            echo "Status: FAILED - Task execution error" >> "$PROGRESS_FILE"
+        if [ $exec_status -ne 0 ] || [ -z "$completed_task_id" ]; then
+            log_error "Task cycle failed"
+            echo "Status: FAILED - Agentic task cycle error" >> "$PROGRESS_FILE"
             exit 1
         fi
+
+        # Get description for logging
+        local task_desc=$(jq -r --arg id "$completed_task_id" '.[] | select(.id == $id) | .description' "$PRD_FILE")
+
+        # Append progress
+        append_progress "$iteration" "$completed_task_id" "$task_desc"
 
         # Verify implementation
         log_info "Verifying implementation..."
@@ -366,14 +420,14 @@ main() {
         fi
 
         # Mark task complete
-        mark_task_complete "$task_id"
+        mark_task_complete "$completed_task_id"
 
         # Append success to progress
         echo "Status: ✓ COMPLETE" >> "$PROGRESS_FILE"
         echo "Verification: All checks passed" >> "$PROGRESS_FILE"
 
         # Commit changes
-        commit_task "$task_id" "$task_desc"
+        commit_task "$completed_task_id" "$task_desc"
 
         log_success "Iteration $iteration complete"
 

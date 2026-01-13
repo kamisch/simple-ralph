@@ -47,7 +47,6 @@ for iteration in 1..max_iterations:
     "id": "task-1",
     "description": "Clear, actionable task description",
     "passes": false,
-    "priority": 1,
     "context": "Additional context, dependencies, or notes"
   }
 ]
@@ -56,7 +55,6 @@ for iteration in 1..max_iterations:
 - **id**: Unique identifier for the task
 - **description**: What needs to be done (clear, specific)
 - **passes**: Boolean flag (false = incomplete, true = complete)
-- **priority**: Optional numeric priority (lower = higher priority)
 - **context**: Optional additional information for the AI agent
 
 ### progress.txt Format
@@ -165,10 +163,7 @@ This signals that the entire backlog is complete.
 - Each task should be independently verifiable
 
 ### Task Ordering
-- Use priority field for dependencies
-- Start with foundational tasks (setup, core classes)
-- Build incrementally
-
+- Determine dependencies between tasks and select the highest priority incomplete task.
 ### Context Field
 - Include relevant file paths
 - Mention dependencies on other tasks
@@ -230,17 +225,7 @@ verify_implementation() {
 }
 ```
 
-### Changing Task Selection
-Edit `get_next_task()` to change priority logic:
 
-```bash
-get_next_task() {
-    # Get highest priority incomplete task
-    local task=$(jq -r '.[] | select(.passes == false) | @json' "$PRD_FILE" \
-        | jq -s 'sort_by(.priority) | .[0]')
-    echo "$task"
-}
-```
 
 ## Troubleshooting
 
