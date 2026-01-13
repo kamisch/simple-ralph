@@ -16,7 +16,7 @@
   {
     "id": "task-3",
     "description": "Build PRD manager to read and update prd.json",
-    "passes": false,
+    "passes": true,
     "priority": 3,
     "context": "Create a PRDManager class that can read tasks from prd.json, find incomplete tasks, and update task status."
   },
