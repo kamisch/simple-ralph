@@ -77,86 +77,123 @@ else
         # Try to use Claude to generate PRD
         # Strategy: Try local 'claude' -> Try Docker 'claude' -> Fallback to template
 
-        generate_prd_with_command() {
-            local cmd="$1"
-            local prompt_text="$2"
+        generate_prd_with_docker() {
+            local prompt_file="$1"
+            local project_path="$2"
 
-            echo "Attempting to generate prd.json using AI..."
-            echo "  Command: ${cmd%% *}..."  # Show first part of command
-            local temp_prd=$(mktemp)
-            local temp_err=$(mktemp)
+            echo "Attempting to generate prd.json using Docker sandbox..."
 
-            # Execute command with prompt as argument
-            set +e  # Temporarily disable exit on error to capture exit code
-            $cmd "$prompt_text" > "$temp_prd" 2> "$temp_err"
-            local exit_code=$?
-            set -e  # Re-enable exit on error
+            # Check if docker sandbox command is available
+            if ! docker sandbox --help &> /dev/null; then
+                echo "⚠ Docker sandbox command not available"
+                echo "  This requires Docker Desktop with AI Sandboxes enabled"
+                return 1
+            fi
 
-            if [ $exit_code -eq 0 ]; then
-                 # Basic validation: check if it's valid JSON array
-                 if jq -e '. | type == "array"' "$temp_prd" >/dev/null 2>&1; then
-                     mv "$temp_prd" "$TARGET_DIR/plans/prd.json"
-                     echo "✓ Generated plans/prd.json using AI"
-                     rm -f "$temp_prd" "$temp_err"
-                     return 0
-                 else
-                     echo "⚠ Command succeeded but output is not a valid JSON array"
-                     echo "  Output preview:"
-                     head -5 "$temp_prd" | sed 's/^/    /'
-                 fi
+            # Read the PRD generation prompt
+            local base_prompt=$(cat "$prompt_file")
+
+            # Add project context by listing files
+            echo "  Analyzing project structure..."
+            local project_files=""
+            if command -v rg &> /dev/null; then
+                project_files=$(cd "$project_path" && rg --files 2>/dev/null | head -50 | sed 's/^/  - /')
+            elif command -v fd &> /dev/null; then
+                project_files=$(cd "$project_path" && fd -t f 2>/dev/null | head -50 | sed 's/^/  - /')
             else
-                 echo "⚠ Command execution failed (exit code: $exit_code)"
+                project_files=$(cd "$project_path" && find . -type f -not -path '*/\.*' 2>/dev/null | head -50 | sed 's/^/  - /')
             fi
 
-            # Show error output if available
-            if [ -s "$temp_err" ]; then
-                echo "  Error output:"
-                head -10 "$temp_err" | sed 's/^/    /'
+            # Create full prompt with project context
+            local full_prompt="${base_prompt}
+
+## Project Files
+${project_files}
+
+## Instructions
+Please analyze this project and generate a prd.json file with tasks to complete or improve this project.
+Write the output to a file called 'prd.json' in the current directory.
+The file should contain ONLY valid JSON (a JSON array of task objects), no markdown formatting."
+
+            # Create temporary expect script
+            local temp_expect=$(mktemp)
+            cat > "$temp_expect" << 'EOFEXPECT'
+#!/usr/bin/expect -f
+set timeout 300
+set prompt [lindex $argv 0]
+
+# Spawn docker sandbox run claude with prompt
+spawn docker sandbox run claude --dangerously-skip-permissions -p $prompt
+
+# Wait for command to complete
+expect {
+    eof {
+        exit 0
+    }
+    timeout {
+        puts "ERROR: Command timed out after 300 seconds"
+        exit 1
+    }
+}
+EOFEXPECT
+
+            chmod +x "$temp_expect"
+
+            # Execute in the target directory so PRD is written there
+            local exit_code=0
+            (cd "$project_path" && "$temp_expect" "$full_prompt") 2>&1 | tee /tmp/ralph_prd_generation.log || exit_code=$?
+
+            rm -f "$temp_expect"
+
+            if [ $exit_code -ne 0 ]; then
+                echo "⚠ Docker sandbox execution failed"
+
+                # Check for authentication error
+                if grep -q "Invalid API key" /tmp/ralph_prd_generation.log 2>/dev/null; then
+                    echo ""
+                    echo "Authentication Error Detected!"
+                    echo "To fix this, authenticate the Docker sandbox:"
+                    echo "  1. Run: docker sandbox run claude"
+                    echo "  2. In the session, run: /login"
+                    echo "  3. Follow the authentication prompts"
+                    echo "  4. Exit the session (Ctrl+D)"
+                    echo "  5. Run simple-ralph again"
+                    echo ""
+                fi
+
+                return 1
             fi
 
-            # Show stdout if it contains useful information
-            if [ -s "$temp_prd" ] && [ ! -s "$temp_err" ]; then
-                echo "  Output:"
-                head -10 "$temp_prd" | sed 's/^/    /'
+            # Check if prd.json was created in the target directory
+            if [ -f "$project_path/prd.json" ]; then
+                # Validate it's a JSON array
+                if jq -e '. | type == "array"' "$project_path/prd.json" >/dev/null 2>&1; then
+                    # Move to plans directory
+                    mv "$project_path/prd.json" "$TARGET_DIR/plans/prd.json"
+                    echo "✓ Generated plans/prd.json using Docker sandbox"
+                    return 0
+                else
+                    echo "⚠ Generated file is not a valid JSON array"
+                    cat "$project_path/prd.json" | head -10
+                    rm -f "$project_path/prd.json"
+                    return 1
+                fi
+            else
+                echo "⚠ prd.json was not created by Claude"
+                return 1
             fi
-
-            rm -f "$temp_prd" "$temp_err"
-            return 1
         }
 
         PRD_GENERATED=false
         PROMPT_FILE="$TARGET_DIR/plans/GENERATE_PRD_PROMPT.md"
 
         if [ -f "$PROMPT_FILE" ]; then
-            # Read prompt content once
-            PROMPT_CONTENT=$(cat "$PROMPT_FILE")
+            # Get absolute path to project
+            PROJECT_PATH="$(cd "$TARGET_DIR" && pwd)"
 
-            # 1. Try local 'claude'
-            if command -v claude &> /dev/null; then
-                echo "Found local 'claude' command at: $(which claude)"
-                # Check if it's Claude Code CLI (which won't work for simple text generation)
-                if claude --version 2>&1 | grep -q "Claude Code"; then
-                    echo "⚠ Detected Claude Code CLI, which may not work for PRD generation"
-                    echo "  Claude Code is interactive and doesn't output JSON directly to stdout"
-                    echo "  Skipping local claude and trying Docker instead..."
-                else
-                    if generate_prd_with_command "claude" "$PROMPT_CONTENT"; then
-                        PRD_GENERATED=true
-                    else
-                        echo "⚠ Local 'claude' command failed"
-                    fi
-                fi
-            fi
-
-            # 2. Docker Sandbox is interactive and won't work for PRD generation
-            # PRD generation requires outputting pure JSON to stdout, but docker sandbox
-            # and Claude Code CLI are both interactive tools designed for coding sessions.
-            # Users should either:
-            # - Manually create prd.json
-            # - Use the Anthropic API with GENERATE_PRD_PROMPT.md
-            # - Use --new flag for template PRD
-            if [ "$PRD_GENERATED" = false ]; then
-                echo "⚠ Skipping Docker sandbox (interactive tool, not suitable for PRD generation)"
+            # Try to generate PRD using Docker sandbox
+            if generate_prd_with_docker "$PROMPT_FILE" "$PROJECT_PATH"; then
+                PRD_GENERATED=true
             fi
         fi
 
@@ -164,15 +201,10 @@ else
             echo ""
             echo "⚠ Could not generate PRD using AI. Falling back to template."
             echo ""
-            echo "Why PRD generation failed:"
-            echo "  • Claude Code CLI (both local and docker sandbox) is an INTERACTIVE tool"
-            echo "  • It requires a TTY (terminal) and doesn't output JSON to stdout"
-            echo "  • Even with authentication, it opens an interactive coding session"
-            echo ""
             echo "Solutions for PRD generation:"
             echo "  1. Manually edit plans/prd.json with your tasks (recommended)"
-            echo "  2. Use plans/GENERATE_PRD_PROMPT.md with Anthropic API to generate PRD"
-            echo "  3. Start with template and modify: simple-ralph --new <project>"
+            echo "  2. Ensure Docker sandbox authentication: docker sandbox run claude, then /login"
+            echo "  3. Use --new flag for template PRD: simple-ralph --new <project>"
             echo ""
             create_template_prd
         fi
