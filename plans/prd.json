@@ -37,7 +37,7 @@
   {
     "id": "task-6",
     "description": "Write unit tests for Task and PRDManager",
-    "passes": false,
+    "passes": true,
     "priority": 6,
     "context": "Add comprehensive unit tests using a testing framework like Jest or Vitest. Ensure all core functionality is tested."
   },
