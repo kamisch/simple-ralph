@@ -18,21 +18,21 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Logging helpers
+# Logging helpers (all output to stderr to avoid polluting stdout captures)
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    echo -e "${BLUE}[INFO]${NC} $1" >&2
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "${YELLOW}[WARNING]${NC} $1" >&2
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
 # Check dependencies
@@ -237,7 +237,7 @@ $progress_context
 
    COMPLETED_TASK_ID: <task-id>
 
-   For example: COMPLETED_TASK_ID: task-3
+   For example: COMPLETED_TASK_ID: task-42
 
 This output is critical for the orchestration script to track progress."
 
@@ -303,6 +303,12 @@ EOFEXPECT
 
     rm -f "$temp_expect" "$temp_prompt"
 
+    # Check for rate limit errors
+    if grep -q "hit your limit" /tmp/ralph_claude_output.log 2>/dev/null; then
+        log_error "AI Agent hit rate limit. Wait for reset and try again."
+        return 1
+    fi
+
     if [ $exit_code -ne 0 ]; then
         log_error "AI Agent execution failed in Docker sandbox"
         log_error "Check /tmp/ralph_claude_output.log for details"
@@ -330,20 +336,26 @@ EOFEXPECT
         return 1
     fi
 
+    # Validate task exists in PRD
+    if ! jq -e --arg id "$completed_id" '.[] | select(.id == $id)' "$PRD_FILE" > /dev/null 2>&1; then
+        log_error "Task '$completed_id' not found in $PRD_FILE"
+        log_error "Agent may have reported wrong task ID or used example ID"
+        return 1
+    fi
+
     log_success "Agent reported completion of task: $completed_id"
     echo "$completed_id"  # Return the task ID
     return 0
 }
 
 # Create git commit for completed task
+# Handles pre-commit hook failures gracefully
 commit_task() {
     local task_id="$1"
     local task_desc="$2"
 
-    # Stage all changes including PRD and progress files
     git add -A
 
-    # Create commit with descriptive message
     local commit_msg="feat: Complete task $task_id
 
 $task_desc
@@ -356,10 +368,51 @@ Co-Authored-By: Ralph Wiggum (AI Agent) <ralph@ai.local>"
 
     if git diff --cached --quiet; then
         log_warning "No changes to commit for task $task_id"
-    else
-        git commit -m "$commit_msg"
-        log_success "Created commit for task $task_id"
+        return 0
     fi
+
+    log_info "Attempting git commit..."
+    local commit_exit_code=0
+    git commit -m "$commit_msg" 2>&1 || commit_exit_code=$?
+
+    if [ $commit_exit_code -eq 0 ]; then
+        log_success "Created commit for task $task_id"
+        return 0
+    fi
+
+    log_warning "Commit failed (exit code: $commit_exit_code). Checking for auto-formatted files..."
+
+    # Check if pre-commit hooks modified files (auto-formatters)
+    if ! git diff --quiet; then
+        log_info "Detected files modified by pre-commit hooks. Re-staging and retrying..."
+        git add -A
+
+        local retry_exit_code=0
+        git commit -m "$commit_msg" 2>&1 || retry_exit_code=$?
+
+        if [ $retry_exit_code -eq 0 ]; then
+            log_success "Created commit for task $task_id (after re-staging auto-formatted files)"
+            return 0
+        fi
+        log_error "Commit failed after retry (exit code: $retry_exit_code)"
+    else
+        log_error "Commit failed - pre-commit hooks found issues that cannot be auto-fixed"
+    fi
+
+    # Optional: --no-verify fallback
+    if [ "${RALPH_ALLOW_NO_VERIFY:-false}" = "true" ]; then
+        log_warning "RALPH_ALLOW_NO_VERIFY is set. Attempting commit with --no-verify..."
+        local noverify_exit_code=0
+        git commit --no-verify -m "$commit_msg" 2>&1 || noverify_exit_code=$?
+
+        if [ $noverify_exit_code -eq 0 ]; then
+            log_warning "Created commit for task $task_id (with --no-verify, hooks skipped)"
+            return 0
+        fi
+    fi
+
+    log_error "Failed to commit task $task_id"
+    return 1
 }
 
 # Main iteration loop
@@ -427,7 +480,11 @@ main() {
         echo "Verification: All checks passed" >> "$PROGRESS_FILE"
 
         # Commit changes
-        commit_task "$completed_task_id" "$task_desc"
+        if ! commit_task "$completed_task_id" "$task_desc"; then
+            log_error "Failed to commit changes for task $completed_task_id"
+            echo "Status: FAILED - Git commit failed (pre-commit hook issues)" >> "$PROGRESS_FILE"
+            exit 1
+        fi
 
         log_success "Iteration $iteration complete"
 
