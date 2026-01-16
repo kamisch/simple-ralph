@@ -299,7 +299,7 @@ EOFEXPECT
 
     # Execute the expect script
     local exit_code=0
-    "$temp_expect" "$temp_prompt" 2>&1 | tee /tmp/ralph_claude_output.log || exit_code=$?
+    "$temp_expect" "$temp_prompt" > /tmp/ralph_claude_output.log 2>&1 || exit_code=$?
 
     rm -f "$temp_expect" "$temp_prompt"
 
