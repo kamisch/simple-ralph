@@ -20,7 +20,7 @@ Simple Ralph implements the **Ralph Wiggum Technique**: a simple orchestration p
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourorg/simple-ralph.git
+git clone <repository-url>
 cd simple-ralph
 
 # Run the installer
@@ -29,19 +29,7 @@ cd simple-ralph
 
 This installs Simple Ralph to `~/.ralph/` and creates the `simple-ralph` command.
 
-### Add to PATH
-
-Add the following to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.):
-
-```bash
-export PATH="$HOME/.ralph/bin:$PATH"
-```
-
-Then reload your shell:
-
-```bash
-source ~/.zshrc  # or ~/.bashrc
-```
+The installer automatically adds `~/.ralph/bin` to your PATH by updating your shell config (`~/.zshrc`, `~/.bashrc`, or `~/.bash_profile`). Restart your terminal or run `source ~/.zshrc` (or equivalent) to apply.
 
 ## Usage
 
@@ -72,6 +60,8 @@ simple-ralph --no-generate /path/to/your/project
 - `plans/ralph.sh` - Main orchestration script
 - `plans/prd.json` - Your task backlog (auto-generated or empty template)
 - `plans/progress.txt` - AI agent's memory log
+- `plans/RALPH_EXPLANATION.md` - Explanation of the Ralph technique
+- `plans/GENERATE_PRD_PROMPT.md` - Prompt template for PRD generation
 
 ### 2. Define Your Tasks
 
@@ -152,7 +142,7 @@ If this file exists and is executable, Ralph will use it instead of auto-detecte
 
 ## Docker Sandbox Authentication
 
-Simple Ralph uses Docker Desktop's sandbox feature to run Claude Code in isolation.
+Simple Ralph uses Docker Desktop's sandbox feature to run Claude Code in isolation. For more details, see the [Docker AI Sandboxes documentation](https://docs.docker.com/ai/sandboxes/claude-code).
 
 ### First-Time Setup
 
@@ -185,10 +175,12 @@ exit
 ```
 your-project/
 ├── plans/
-│   ├── ralph.sh           # Orchestration script
-│   ├── prd.json           # Task backlog
-│   └── progress.txt       # AI memory/log
-├── ralph-post-hook.sh     # (Optional) Custom verification
+│   ├── ralph.sh              # Orchestration script
+│   ├── prd.json              # Task backlog
+│   ├── progress.txt          # AI memory/log
+│   ├── RALPH_EXPLANATION.md  # Technique explanation
+│   └── GENERATE_PRD_PROMPT.md # PRD generation prompt
+├── ralph-post-hook.sh        # (Optional) Custom verification
 └── ... your code ...
 ```
 
