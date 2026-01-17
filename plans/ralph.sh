@@ -237,7 +237,7 @@ $progress_context
 
    COMPLETED_TASK_ID: <task-id>
 
-   For example: COMPLETED_TASK_ID: task-42
+   For example: COMPLETED_TASK_ID: YOUR-ACTUAL-TASK-ID
 
 This output is critical for the orchestration script to track progress."
 
