@@ -9,8 +9,16 @@ TARGET_DIR="."
 AI_AGENT="claude"  # Default AI agent
 
 # Parse arguments
+# Parse arguments
+MODE="run"
+POSITIONAL_ARGS=()
+
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --setup)
+      MODE="setup"
+      shift # past argument
+      ;;
     --no-generate)
       SKIP_PRD_GENERATION=true
       shift # past argument
@@ -25,11 +33,16 @@ while [[ $# -gt 0 ]]; do
       shift # past value
       ;;
     *)
-      TARGET_DIR="$1"
+      POSITIONAL_ARGS+=("$1")
       shift # past argument
       ;;
   esac
 done
+
+# Restore positional args
+if [ ${#POSITIONAL_ARGS[@]} -gt 0 ]; then
+  set -- "${POSITIONAL_ARGS[@]}"
+fi
 
 # Validate AI agent selection
 if [[ "$AI_AGENT" != "claude" && "$AI_AGENT" != "gemini" && "$AI_AGENT" != "codex" ]]; then
@@ -40,26 +53,43 @@ fi
 # The directory where this script (and the templates) resides
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "Setting up Ralph framework in: $TARGET_DIR/plans"
 
-# Create target plans directory
-mkdir -p "$TARGET_DIR/plans"
+if [ "$MODE" = "run" ]; then
+    # Run Mode: Execute Ralph loop
+    
+    # Check if we are in a Ralph project
+    if [ ! -f "$TARGET_DIR/plans/prd.json" ]; then
+        echo "Error: plans/prd.json not found."
+        echo "Are you in a Ralph project?"
+        echo "To initialize a new project, run: simple-ralph --setup"
+        exit 1
+    fi
 
-# Copy Ralph script and make executable
-if [ -f "$SOURCE_DIR/ralph.sh" ]; then
-    cp "$SOURCE_DIR/ralph.sh" "$TARGET_DIR/plans/ralph.sh"
-    chmod +x "$TARGET_DIR/plans/ralph.sh"
-    echo "✓ Copied plans/ralph.sh"
+    # Source the global ralph.sh script
+    echo "Starting Ralph..."
+    if [ -f "$SOURCE_DIR/ralph.sh" ]; then
+        # Export agent selection so ralph.sh can pick it up
+        export RALPH_AI_AGENT="$AI_AGENT"
+        # Execute ralph.sh in current shell to preserve env
+        "$SOURCE_DIR/ralph.sh" "$@"
+    else
+        echo "Error: Global ralph.sh not found at $SOURCE_DIR/ralph.sh"
+        exit 1
+    fi
+
 else
-    echo "Error: ralph.sh not found in template directory ($SOURCE_DIR)"
-    exit 1
-fi
+    # Setup Mode: Initialize project
+    echo "Setting up Ralph framework in: $TARGET_DIR/plans"
 
-# Copy explanation if it exists
-if [ -f "$SOURCE_DIR/RALPH_EXPLANATION.md" ]; then
-    cp "$SOURCE_DIR/RALPH_EXPLANATION.md" "$TARGET_DIR/plans/RALPH_EXPLANATION.md"
-    echo "✓ Copied plans/RALPH_EXPLANATION.md"
-fi
+    # Create target plans directory
+    mkdir -p "$TARGET_DIR/plans"
+
+    # Copy explanation if it exists
+    if [ -f "$SOURCE_DIR/RALPH_EXPLANATION.md" ]; then
+        cp "$SOURCE_DIR/RALPH_EXPLANATION.md" "$TARGET_DIR/plans/RALPH_EXPLANATION.md"
+        echo "✓ Copied plans/RALPH_EXPLANATION.md"
+    fi
+
 
 # Copy PRD generation prompt if it exists
 if [ -f "$SOURCE_DIR/GENERATE_PRD_PROMPT.md" ]; then
@@ -312,14 +342,17 @@ The file should contain ONLY valid JSON (a JSON array of task objects), no markd
     fi
 fi
 
-# Create progress.txt if it doesn't exist
-if [ ! -f "$TARGET_DIR/plans/progress.txt" ]; then
-    touch "$TARGET_DIR/plans/progress.txt"
-    echo "✓ Created empty plans/progress.txt"
-else
-    echo "⚠ plans/progress.txt already exists, skipping"
+
+    # Create progress.txt if it doesn't exist
+    if [ ! -f "$TARGET_DIR/plans/progress.txt" ]; then
+        touch "$TARGET_DIR/plans/progress.txt"
+        echo "✓ Created empty plans/progress.txt"
+    else
+        echo "⚠ plans/progress.txt already exists, skipping"
+    fi
+
+    echo ""
+    echo "Ralph framework setup complete!"
+    echo "Run 'simple-ralph' to start the agent loop."
 fi
 
-echo ""
-echo "Ralph framework setup complete!"
-echo "Usage: ./plans/ralph.sh [max_iterations]"

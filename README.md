@@ -35,14 +35,15 @@ The installer automatically adds `~/.ralph/bin` to your PATH by updating your sh
 
 ### 1. Initialize Your Project
 
-Navigate to your project and run:
+Navigate to your project root and run:
 
 ```bash
-simple-ralph /path/to/your/project
+cd your-project
+simple-ralph --setup
 ```
 
 This will:
-1. Copy the template files into your project
+1. Create the `plans` directory
 2. **Auto-generate `prd.json`** by analyzing your codebase using AI
 
 > **Important**: You must authenticate Docker sandbox first before running this command (see [Docker Sandbox Authentication](#docker-sandbox-authentication)).
@@ -52,7 +53,7 @@ This will:
 To use Gemini for PRD generation:
 
 ```bash
-simple-ralph --agent gemini /path/to/your/project
+simple-ralph --setup --agent gemini
 ```
 
 #### Using Codex (OpenAI)
@@ -60,22 +61,21 @@ simple-ralph --agent gemini /path/to/your/project
 To use Codex for PRD generation:
 
 ```bash
-simple-ralph --agent codex /path/to/your/project
+simple-ralph --setup --agent codex
 ```
 
 > **Note**: Codex runs directly from your host machine (not Docker sandbox). Ensure `OPENAI_API_KEY` is set and the Codex CLI is installed.
 
 #### Skip PRD Generation
 
-To copy just the empty templates without AI-generated tasks:
+To create just the empty templates without AI-generated tasks:
 
 ```bash
-simple-ralph --no-generate /path/to/your/project
+simple-ralph --setup --no-generate
 ```
 
 #### Files Created
 
-- `plans/ralph.sh` - Main orchestration script
 - `plans/prd.json` - Your task backlog (auto-generated or empty template)
 - `plans/progress.txt` - AI agent's memory log
 - `plans/RALPH_EXPLANATION.md` - Explanation of the Ralph technique
@@ -110,8 +110,13 @@ Edit `plans/prd.json` to define your backlog:
 ### 3. Run Ralph
 
 ```bash
-cd your-project
-./plans/ralph.sh 10  # Run up to 10 iterations
+simple-ralph [max_iterations]
+```
+
+Example:
+
+```bash
+simple-ralph 10
 ```
 
 #### Selecting an AI Agent
@@ -119,12 +124,7 @@ cd your-project
 By default, Ralph uses Claude. To use Gemini instead:
 
 ```bash
-# Set the AI agent via environment variable
-export RALPH_AI_AGENT=gemini
-./plans/ralph.sh 10
-
-# Or inline
-RALPH_AI_AGENT=gemini ./plans/ralph.sh 10
+simple-ralph --agent gemini 10
 ```
 
 Valid agents: `claude`, `gemini`, `codex`

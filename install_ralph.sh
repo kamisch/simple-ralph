@@ -86,4 +86,4 @@ fi
 
 echo ""
 echo "Installation complete!"
-echo "Run 'simple-ralph --help' to get started."
+echo "Run 'simple-ralph --help' or 'simple-ralph --setup' to get started."

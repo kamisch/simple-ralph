@@ -246,7 +246,7 @@ $progress_context
 
    COMPLETED_TASK_ID: <task-id>
 
-   For example: COMPLETED_TASK_ID: YOUR-ACTUAL-TASK-ID
+   (IMPORTANT: Replace <task-id> with the actual ID strings from the backlog above, e.g., 'setup-ci' or 'fix-login'. Do NOT use placeholders.)
 
 This output is critical for the orchestration script to track progress."
 
