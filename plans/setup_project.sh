@@ -170,7 +170,7 @@ set prompt [lindex $argv 0]
 set ai_agent [lindex $argv 1]
 
 # Spawn docker sandbox run with the selected AI agent
-spawn docker sandbox run $ai_agent --dangerously-skip-permissions -p $prompt
+spawn docker sandbox run $ai_agent -p $prompt
 
 # Wait for command to complete
 expect {
@@ -273,7 +273,7 @@ The file should contain ONLY valid JSON (a JSON array of task objects), no markd
             # Execute codex in the target directory
             local exit_code=0
             echo "  Running Codex in full-auto mode..."
-            (cd "$project_path" && codex --full-auto --quiet "$full_prompt") 2>&1 | tee /tmp/ralph_prd_generation.log || exit_code=$?
+            (cd "$project_path" && codex --full-auto exec "$full_prompt") 2>&1 | tee /tmp/ralph_prd_generation.log || exit_code=$?
 
             if [ $exit_code -ne 0 ]; then
                 echo "⚠ Codex execution failed"

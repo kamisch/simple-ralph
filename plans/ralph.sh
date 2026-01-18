@@ -278,7 +278,7 @@ This output is critical for the orchestration script to track progress."
         # --full-auto: runs without user confirmation
         # --quiet: reduces output noise
         log_info "Running Codex in full-auto mode..."
-        codex --full-auto --quiet "$(cat "$temp_prompt")" > /tmp/ralph_${AI_AGENT}_output.log 2>&1 || exit_code=$?
+        codex --full-auto exec "$(cat "$temp_prompt")" > /tmp/ralph_${AI_AGENT}_output.log 2>&1 || exit_code=$?
 
         rm -f "$temp_prompt"
 
@@ -333,7 +333,7 @@ set prompt_content [read $fp]
 close $fp
 
 # Spawn docker sandbox run with the selected AI agent
-spawn docker sandbox run $ai_agent --dangerously-skip-permissions -p $prompt_content
+spawn docker sandbox run $ai_agent -p $prompt_content
 
 # Wait for the command to complete
 expect {
@@ -349,7 +349,7 @@ EOFEXPECT
 
         chmod +x "$temp_expect"
 
-        # Execute the expect script with AI agent as second argument
+        # Execute the expect script with agent
         "$temp_expect" "$temp_prompt" "$AI_AGENT" > /tmp/ralph_${AI_AGENT}_output.log 2>&1 || exit_code=$?
 
         rm -f "$temp_expect" "$temp_prompt"
