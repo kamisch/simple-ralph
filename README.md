@@ -47,6 +47,14 @@ This will:
 
 > **Important**: You must authenticate Docker sandbox first before running this command (see [Docker Sandbox Authentication](#docker-sandbox-authentication)).
 
+#### Using Gemini Instead of Claude
+
+To use Gemini for PRD generation:
+
+```bash
+simple-ralph --agent gemini /path/to/your/project
+```
+
 #### Skip PRD Generation
 
 To copy just the empty templates without AI-generated tasks:
@@ -96,6 +104,21 @@ cd your-project
 ./plans/ralph.sh 10  # Run up to 10 iterations
 ```
 
+#### Selecting an AI Agent
+
+By default, Ralph uses Claude. To use Gemini instead:
+
+```bash
+# Set the AI agent via environment variable
+export RALPH_AI_AGENT=gemini
+./plans/ralph.sh 10
+
+# Or inline
+RALPH_AI_AGENT=gemini ./plans/ralph.sh 10
+```
+
+Valid agents: `claude`, `gemini`
+
 The script will:
 1. Send the full backlog + recent history to the AI agent
 2. Agent selects highest priority task and implements it
@@ -142,15 +165,31 @@ If this file exists and is executable, Ralph will use it instead of auto-detecte
 
 ## Docker Sandbox Authentication
 
-Simple Ralph uses Docker Desktop's sandbox feature to run Claude Code in isolation. For more details, see the [Docker AI Sandboxes documentation](https://docs.docker.com/ai/sandboxes/claude-code).
+Simple Ralph uses Docker Desktop's sandbox feature to run AI coding agents in isolation. For more details, see the [Docker AI Sandboxes documentation](https://docs.docker.com/ai/sandboxes/).
 
 ### First-Time Setup
 
-Before running `ralph.sh`, you must authenticate your workspace:
+Before running `ralph.sh`, you must authenticate your workspace for the AI agent you want to use:
+
+#### Claude
 
 ```bash
 # Start an interactive sandbox session
 docker sandbox run claude
+
+# Inside the sandbox, authenticate:
+/login
+
+# Follow the prompts to complete authentication
+# Then exit the sandbox
+exit
+```
+
+#### Gemini
+
+```bash
+# Start an interactive sandbox session
+docker sandbox run gemini
 
 # Inside the sandbox, authenticate:
 /login
@@ -167,8 +206,9 @@ exit
 | Issue | Solution |
 |-------|----------|
 | `Docker sandbox command not available` | Enable AI Sandboxes in Docker Desktop settings |
-| `Invalid API key` | Run `/login` in an interactive sandbox session |
+| `Invalid API key` | Run `/login` in an interactive sandbox session for your selected agent |
 | Sandbox times out | Increase timeout in `ralph.sh` (default: 600s) |
+| Wrong agent selected | Use `RALPH_AI_AGENT=gemini` or `RALPH_AI_AGENT=claude` |
 
 ## Project Structure
 

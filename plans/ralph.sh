@@ -11,6 +11,15 @@ PRD_FILE="plans/prd.json"
 PROGRESS_FILE="plans/progress.txt"
 COMPLETION_SIGNAL="promise complete here"
 
+# AI Agent selection: claude or gemini (default: claude)
+AI_AGENT="${RALPH_AI_AGENT:-claude}"
+
+# Validate AI agent selection
+if [[ "$AI_AGENT" != "claude" && "$AI_AGENT" != "gemini" ]]; then
+    echo "Error: Invalid AI_AGENT '$AI_AGENT'. Must be 'claude' or 'gemini'." >&2
+    exit 1
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -244,13 +253,13 @@ This output is critical for the orchestration script to track progress."
     # ============================================================================
     # AI AGENT INVOCATION POINT
     # ============================================================================
-    log_info "Invoking AI agent via Docker sandbox..."
+    log_info "Invoking AI agent ($AI_AGENT) via Docker sandbox..."
 
     # Check if docker sandbox command is available (Docker Desktop feature)
     if ! docker sandbox --help &> /dev/null; then
         log_error "Docker sandbox command not available"
         log_error "This requires Docker Desktop with AI Sandboxes enabled"
-        log_error "See: https://docs.docker.com/ai/sandboxes/claude-code"
+        log_error "See: https://docs.docker.com/ai/sandboxes/"
         return 1
     fi
 
@@ -274,14 +283,15 @@ This output is critical for the orchestration script to track progress."
 #!/usr/bin/expect -f
 set timeout 600
 set prompt_file [lindex $argv 0]
+set ai_agent [lindex $argv 1]
 
 # Read prompt from file
 set fp [open $prompt_file r]
 set prompt_content [read $fp]
 close $fp
 
-# Spawn docker sandbox run claude with non-interactive flags
-spawn docker sandbox run claude --dangerously-skip-permissions -p $prompt_content
+# Spawn docker sandbox run with the selected AI agent
+spawn docker sandbox run $ai_agent --dangerously-skip-permissions -p $prompt_content
 
 # Wait for the command to complete
 expect {
@@ -297,27 +307,27 @@ EOFEXPECT
 
     chmod +x "$temp_expect"
 
-    # Execute the expect script
+    # Execute the expect script with AI agent as second argument
     local exit_code=0
-    "$temp_expect" "$temp_prompt" > /tmp/ralph_claude_output.log 2>&1 || exit_code=$?
+    "$temp_expect" "$temp_prompt" "$AI_AGENT" > /tmp/ralph_${AI_AGENT}_output.log 2>&1 || exit_code=$?
 
     rm -f "$temp_expect" "$temp_prompt"
 
     # Check for rate limit errors
-    if grep -q "hit your limit" /tmp/ralph_claude_output.log 2>/dev/null; then
-        log_error "AI Agent hit rate limit. Wait for reset and try again."
+    if grep -q "hit your limit" /tmp/ralph_${AI_AGENT}_output.log 2>/dev/null; then
+        log_error "AI Agent ($AI_AGENT) hit rate limit. Wait for reset and try again."
         return 1
     fi
 
     if [ $exit_code -ne 0 ]; then
-        log_error "AI Agent execution failed in Docker sandbox"
-        log_error "Check /tmp/ralph_claude_output.log for details"
+        log_error "AI Agent ($AI_AGENT) execution failed in Docker sandbox"
+        log_error "Check /tmp/ralph_${AI_AGENT}_output.log for details"
 
-        if grep -q "Invalid API key" /tmp/ralph_claude_output.log; then
+        if grep -q "Invalid API key" /tmp/ralph_${AI_AGENT}_output.log; then
             log_error ""
             log_error "Authentication Error Detected!"
             log_error "To fix this, you need to authenticate the Docker sandbox:"
-            log_error "  1. Run: docker sandbox run claude"
+            log_error "  1. Run: docker sandbox run $AI_AGENT"
             log_error "  2. In the interactive session, run: /login"
             log_error "  3. Follow the authentication prompts"
             log_error "  4. After successful login, exit the session (Ctrl+D)"
@@ -328,11 +338,11 @@ EOFEXPECT
     fi
 
     # Parse the completed task ID from the output
-    local completed_id=$(grep -oE 'COMPLETED_TASK_ID:[[:space:]]*[a-zA-Z0-9_-]+' /tmp/ralph_claude_output.log | tail -1 | sed 's/COMPLETED_TASK_ID:[[:space:]]*//')
+    local completed_id=$(grep -oE 'COMPLETED_TASK_ID:[[:space:]]*[a-zA-Z0-9_-]+' /tmp/ralph_${AI_AGENT}_output.log | tail -1 | sed 's/COMPLETED_TASK_ID:[[:space:]]*//')
 
     if [ -z "$completed_id" ]; then
         log_error "Agent did not report a COMPLETED_TASK_ID"
-        log_error "Check /tmp/ralph_claude_output.log for agent output"
+        log_error "Check /tmp/ralph_${AI_AGENT}_output.log for agent output"
         return 1
     fi
 

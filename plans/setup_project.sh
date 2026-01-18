@@ -6,6 +6,7 @@ set -euo pipefail
 
 SKIP_PRD_GENERATION=false
 TARGET_DIR="."
+AI_AGENT="claude"  # Default AI agent
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -14,12 +15,27 @@ while [[ $# -gt 0 ]]; do
       SKIP_PRD_GENERATION=true
       shift # past argument
       ;;
+    --agent=*)
+      AI_AGENT="${1#*=}"
+      shift # past argument
+      ;;
+    --agent)
+      AI_AGENT="$2"
+      shift # past argument
+      shift # past value
+      ;;
     *)
       TARGET_DIR="$1"
       shift # past argument
       ;;
   esac
 done
+
+# Validate AI agent selection
+if [[ "$AI_AGENT" != "claude" && "$AI_AGENT" != "gemini" ]]; then
+    echo "Error: Invalid AI agent '$AI_AGENT'. Must be 'claude' or 'gemini'."
+    exit 1
+fi
 
 # The directory where this script (and the templates) resides
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,8 +95,9 @@ else
         generate_prd_with_docker() {
             local prompt_file="$1"
             local project_path="$2"
+            local agent="$3"
 
-            echo "Attempting to generate prd.json using Docker sandbox..."
+            echo "Attempting to generate prd.json using Docker sandbox ($agent)..."
 
             # Check if docker sandbox command is available
             if ! docker sandbox --help &> /dev/null; then
@@ -120,9 +137,10 @@ The file should contain ONLY valid JSON (a JSON array of task objects), no markd
 #!/usr/bin/expect -f
 set timeout 300
 set prompt [lindex $argv 0]
+set ai_agent [lindex $argv 1]
 
-# Spawn docker sandbox run claude with prompt
-spawn docker sandbox run claude --dangerously-skip-permissions -p $prompt
+# Spawn docker sandbox run with the selected AI agent
+spawn docker sandbox run $ai_agent --dangerously-skip-permissions -p $prompt
 
 # Wait for command to complete
 expect {
@@ -140,7 +158,7 @@ EOFEXPECT
 
             # Execute in the target directory so PRD is written there
             local exit_code=0
-            (cd "$project_path" && "$temp_expect" "$full_prompt") 2>&1 | tee /tmp/ralph_prd_generation.log || exit_code=$?
+            (cd "$project_path" && "$temp_expect" "$full_prompt" "$agent") 2>&1 | tee /tmp/ralph_prd_generation.log || exit_code=$?
 
             rm -f "$temp_expect"
 
@@ -152,7 +170,7 @@ EOFEXPECT
                     echo ""
                     echo "Authentication Error Detected!"
                     echo "To fix this, authenticate the Docker sandbox:"
-                    echo "  1. Run: docker sandbox run claude"
+                    echo "  1. Run: docker sandbox run $agent"
                     echo "  2. In the session, run: /login"
                     echo "  3. Follow the authentication prompts"
                     echo "  4. Exit the session (Ctrl+D)"
@@ -191,7 +209,7 @@ EOFEXPECT
             PROJECT_PATH="$(cd "$TARGET_DIR" && pwd)"
 
             # Try to generate PRD using Docker sandbox
-            if generate_prd_with_docker "$PROMPT_FILE" "$PROJECT_PATH"; then
+            if generate_prd_with_docker "$PROMPT_FILE" "$PROJECT_PATH" "$AI_AGENT"; then
                 PRD_GENERATED=true
             fi
         fi
@@ -202,7 +220,7 @@ EOFEXPECT
             echo ""
             echo "Solutions for PRD generation:"
             echo "  1. Manually edit plans/prd.json with your tasks (recommended)"
-            echo "  2. Ensure Docker sandbox authentication: docker sandbox run claude, then /login"
+            echo "  2. Ensure Docker sandbox authentication: docker sandbox run $AI_AGENT, then /login"
             echo "  3. Use --no-generate flag for template PRD: simple-ralph --no-generate <project>"
             echo ""
             create_template_prd
