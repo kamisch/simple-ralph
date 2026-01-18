@@ -11,12 +11,12 @@ PRD_FILE="plans/prd.json"
 PROGRESS_FILE="plans/progress.txt"
 COMPLETION_SIGNAL="promise complete here"
 
-# AI Agent selection: claude or gemini (default: claude)
+# AI Agent selection: claude, gemini, or codex (default: claude)
 AI_AGENT="${RALPH_AI_AGENT:-claude}"
 
 # Validate AI agent selection
-if [[ "$AI_AGENT" != "claude" && "$AI_AGENT" != "gemini" ]]; then
-    echo "Error: Invalid AI_AGENT '$AI_AGENT'. Must be 'claude' or 'gemini'." >&2
+if [[ "$AI_AGENT" != "claude" && "$AI_AGENT" != "gemini" && "$AI_AGENT" != "codex" ]]; then
+    echo "Error: Invalid AI_AGENT '$AI_AGENT'. Must be 'claude', 'gemini', or 'codex'." >&2
     exit 1
 fi
 
@@ -253,33 +253,75 @@ This output is critical for the orchestration script to track progress."
     # ============================================================================
     # AI AGENT INVOCATION POINT
     # ============================================================================
-    log_info "Invoking AI agent ($AI_AGENT) via Docker sandbox..."
-
-    # Check if docker sandbox command is available (Docker Desktop feature)
-    if ! docker sandbox --help &> /dev/null; then
-        log_error "Docker sandbox command not available"
-        log_error "This requires Docker Desktop with AI Sandboxes enabled"
-        log_error "See: https://docs.docker.com/ai/sandboxes/"
-        return 1
-    fi
-
-    # Check if a sandbox exists for this workspace (for logging only)
-    local workspace_dir="$(pwd)"
-    local existing_sandbox=$(docker sandbox ls | awk -v ws="$workspace_dir" 'NR > 1 && $4 == ws {print $1; exit}')
-
-    if [ -n "$existing_sandbox" ]; then
-        log_info "Found existing sandbox: $existing_sandbox (will be reused with auth state)"
-    else
-        log_info "No existing sandbox found - will create new one for this workspace"
-    fi
 
     # Create a temporary file for the prompt (handles special characters safely)
     local temp_prompt=$(mktemp)
     printf '%s' "$prompt" > "$temp_prompt"
 
-    # Create a temporary expect script to automate docker sandbox interaction
-    local temp_expect=$(mktemp)
-    cat > "$temp_expect" << 'EOFEXPECT'
+    local exit_code=0
+
+    if [ "$AI_AGENT" = "codex" ]; then
+        # ======================================================================
+        # CODEX: Run directly from host machine (not supported in Docker sandbox)
+        # ======================================================================
+        log_info "Invoking AI agent ($AI_AGENT) directly from host machine..."
+
+        # Check if codex command is available
+        if ! command -v codex &> /dev/null; then
+            log_error "'codex' command not found"
+            log_error "Please install Codex CLI: https://github.com/openai/codex"
+            rm -f "$temp_prompt"
+            return 1
+        fi
+
+        # Run codex with the prompt
+        # --full-auto: runs without user confirmation
+        # --quiet: reduces output noise
+        log_info "Running Codex in full-auto mode..."
+        codex --full-auto --quiet "$(cat "$temp_prompt")" > /tmp/ralph_${AI_AGENT}_output.log 2>&1 || exit_code=$?
+
+        rm -f "$temp_prompt"
+
+        if [ $exit_code -ne 0 ]; then
+            log_error "Codex execution failed"
+            log_error "Check /tmp/ralph_${AI_AGENT}_output.log for details"
+
+            if grep -q "OPENAI_API_KEY" /tmp/ralph_${AI_AGENT}_output.log; then
+                log_error ""
+                log_error "API Key Error Detected!"
+                log_error "Make sure OPENAI_API_KEY is set in your environment"
+                log_error ""
+            fi
+            return 1
+        fi
+    else
+        # ======================================================================
+        # CLAUDE/GEMINI: Run via Docker sandbox
+        # ======================================================================
+        log_info "Invoking AI agent ($AI_AGENT) via Docker sandbox..."
+
+        # Check if docker sandbox command is available (Docker Desktop feature)
+        if ! docker sandbox --help &> /dev/null; then
+            log_error "Docker sandbox command not available"
+            log_error "This requires Docker Desktop with AI Sandboxes enabled"
+            log_error "See: https://docs.docker.com/ai/sandboxes/"
+            rm -f "$temp_prompt"
+            return 1
+        fi
+
+        # Check if a sandbox exists for this workspace (for logging only)
+        local workspace_dir="$(pwd)"
+        local existing_sandbox=$(docker sandbox ls | awk -v ws="$workspace_dir" 'NR > 1 && $4 == ws {print $1; exit}')
+
+        if [ -n "$existing_sandbox" ]; then
+            log_info "Found existing sandbox: $existing_sandbox (will be reused with auth state)"
+        else
+            log_info "No existing sandbox found - will create new one for this workspace"
+        fi
+
+        # Create a temporary expect script to automate docker sandbox interaction
+        local temp_expect=$(mktemp)
+        cat > "$temp_expect" <<'EOFEXPECT'
 #!/usr/bin/expect -f
 set timeout 600
 set prompt_file [lindex $argv 0]
@@ -305,35 +347,35 @@ expect {
 }
 EOFEXPECT
 
-    chmod +x "$temp_expect"
+        chmod +x "$temp_expect"
 
-    # Execute the expect script with AI agent as second argument
-    local exit_code=0
-    "$temp_expect" "$temp_prompt" "$AI_AGENT" > /tmp/ralph_${AI_AGENT}_output.log 2>&1 || exit_code=$?
+        # Execute the expect script with AI agent as second argument
+        "$temp_expect" "$temp_prompt" "$AI_AGENT" > /tmp/ralph_${AI_AGENT}_output.log 2>&1 || exit_code=$?
 
-    rm -f "$temp_expect" "$temp_prompt"
+        rm -f "$temp_expect" "$temp_prompt"
+
+        if [ $exit_code -ne 0 ]; then
+            log_error "AI Agent ($AI_AGENT) execution failed in Docker sandbox"
+            log_error "Check /tmp/ralph_${AI_AGENT}_output.log for details"
+
+            if grep -q "Invalid API key" /tmp/ralph_${AI_AGENT}_output.log; then
+                log_error ""
+                log_error "Authentication Error Detected!"
+                log_error "To fix this, you need to authenticate the Docker sandbox:"
+                log_error "  1. Run: docker sandbox run $AI_AGENT"
+                log_error "  2. In the interactive session, run: /login"
+                log_error "  3. Follow the authentication prompts"
+                log_error "  4. After successful login, exit the session (Ctrl+D)"
+                log_error "  5. Run ralph.sh again"
+                log_error ""
+            fi
+            return 1
+        fi
+    fi
 
     # Check for rate limit errors
     if grep -q "hit your limit" /tmp/ralph_${AI_AGENT}_output.log 2>/dev/null; then
         log_error "AI Agent ($AI_AGENT) hit rate limit. Wait for reset and try again."
-        return 1
-    fi
-
-    if [ $exit_code -ne 0 ]; then
-        log_error "AI Agent ($AI_AGENT) execution failed in Docker sandbox"
-        log_error "Check /tmp/ralph_${AI_AGENT}_output.log for details"
-
-        if grep -q "Invalid API key" /tmp/ralph_${AI_AGENT}_output.log; then
-            log_error ""
-            log_error "Authentication Error Detected!"
-            log_error "To fix this, you need to authenticate the Docker sandbox:"
-            log_error "  1. Run: docker sandbox run $AI_AGENT"
-            log_error "  2. In the interactive session, run: /login"
-            log_error "  3. Follow the authentication prompts"
-            log_error "  4. After successful login, exit the session (Ctrl+D)"
-            log_error "  5. Run ralph.sh again"
-            log_error ""
-        fi
         return 1
     fi
 

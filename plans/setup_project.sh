@@ -32,8 +32,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate AI agent selection
-if [[ "$AI_AGENT" != "claude" && "$AI_AGENT" != "gemini" ]]; then
-    echo "Error: Invalid AI agent '$AI_AGENT'. Must be 'claude' or 'gemini'."
+if [[ "$AI_AGENT" != "claude" && "$AI_AGENT" != "gemini" && "$AI_AGENT" != "codex" ]]; then
+    echo "Error: Invalid AI agent '$AI_AGENT'. Must be 'claude', 'gemini', or 'codex'."
     exit 1
 fi
 
@@ -133,7 +133,7 @@ The file should contain ONLY valid JSON (a JSON array of task objects), no markd
 
             # Create temporary expect script
             local temp_expect=$(mktemp)
-            cat > "$temp_expect" << 'EOFEXPECT'
+            cat > "$temp_expect" <<'EOFEXPECT'
 #!/usr/bin/expect -f
 set timeout 300
 set prompt [lindex $argv 0]
@@ -201,6 +201,83 @@ EOFEXPECT
             fi
         }
 
+        # PRD generation using Codex (runs directly from host machine)
+        generate_prd_with_codex() {
+            local prompt_file="$1"
+            local project_path="$2"
+
+            echo "Attempting to generate prd.json using Codex (host machine)..."
+
+            # Check if codex command is available
+            if ! command -v codex &> /dev/null; then
+                echo "⚠ 'codex' command not found"
+                echo "  Please install Codex CLI: https://github.com/openai/codex"
+                return 1
+            fi
+
+            # Read the PRD generation prompt
+            local base_prompt=$(cat "$prompt_file")
+
+            # Add project context by listing files
+            echo "  Analyzing project structure..."
+            local project_files=""
+            if command -v rg &> /dev/null; then
+                project_files=$(cd "$project_path" && rg --files 2>/dev/null | head -50 | sed 's/^/  - /')
+            elif command -v fd &> /dev/null; then
+                project_files=$(cd "$project_path" && fd -t f 2>/dev/null | head -50 | sed 's/^/  - /')
+            else
+                project_files=$(cd "$project_path" && find . -type f -not -path '*/\.*' 2>/dev/null | head -50 | sed 's/^/  - /')
+            fi
+
+            # Create full prompt with project context
+            local full_prompt="${base_prompt}
+
+## Project Files
+${project_files}
+
+## Instructions
+Please analyze this project and generate a prd.json file with tasks to complete or improve this project.
+Write the output to a file called 'prd.json' in the current directory.
+The file should contain ONLY valid JSON (a JSON array of task objects), no markdown formatting."
+
+            # Execute codex in the target directory
+            local exit_code=0
+            echo "  Running Codex in full-auto mode..."
+            (cd "$project_path" && codex --full-auto --quiet "$full_prompt") 2>&1 | tee /tmp/ralph_prd_generation.log || exit_code=$?
+
+            if [ $exit_code -ne 0 ]; then
+                echo "⚠ Codex execution failed"
+
+                if grep -q "OPENAI_API_KEY" /tmp/ralph_prd_generation.log 2>/dev/null; then
+                    echo ""
+                    echo "API Key Error Detected!"
+                    echo "Make sure OPENAI_API_KEY is set in your environment"
+                    echo ""
+                fi
+
+                return 1
+            fi
+
+            # Check if prd.json was created in the target directory
+            if [ -f "$project_path/prd.json" ]; then
+                # Validate it's a JSON array
+                if jq -e '. | type == "array"' "$project_path/prd.json" >/dev/null 2>&1; then
+                    # Move to plans directory
+                    mv "$project_path/prd.json" "$TARGET_DIR/plans/prd.json"
+                    echo "✓ Generated plans/prd.json using Codex"
+                    return 0
+                else
+                    echo "⚠ Generated file is not a valid JSON array"
+                    cat "$project_path/prd.json" | head -10
+                    rm -f "$project_path/prd.json"
+                    return 1
+                fi
+            else
+                echo "⚠ prd.json was not created by Codex"
+                return 1
+            fi
+        }
+
         PRD_GENERATED=false
         PROMPT_FILE="$TARGET_DIR/plans/GENERATE_PRD_PROMPT.md"
 
@@ -208,9 +285,16 @@ EOFEXPECT
             # Get absolute path to project
             PROJECT_PATH="$(cd "$TARGET_DIR" && pwd)"
 
-            # Try to generate PRD using Docker sandbox
-            if generate_prd_with_docker "$PROMPT_FILE" "$PROJECT_PATH" "$AI_AGENT"; then
-                PRD_GENERATED=true
+            # Try to generate PRD with appropriate method based on agent
+            if [ "$AI_AGENT" = "codex" ]; then
+                if generate_prd_with_codex "$PROMPT_FILE" "$PROJECT_PATH"; then
+                    PRD_GENERATED=true
+                fi
+            else
+                # Claude/Gemini use Docker sandbox
+                if generate_prd_with_docker "$PROMPT_FILE" "$PROJECT_PATH" "$AI_AGENT"; then
+                    PRD_GENERATED=true
+                fi
             fi
         fi
 

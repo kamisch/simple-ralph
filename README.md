@@ -55,6 +55,16 @@ To use Gemini for PRD generation:
 simple-ralph --agent gemini /path/to/your/project
 ```
 
+#### Using Codex (OpenAI)
+
+To use Codex for PRD generation:
+
+```bash
+simple-ralph --agent codex /path/to/your/project
+```
+
+> **Note**: Codex runs directly from your host machine (not Docker sandbox). Ensure `OPENAI_API_KEY` is set and the Codex CLI is installed.
+
 #### Skip PRD Generation
 
 To copy just the empty templates without AI-generated tasks:
@@ -117,7 +127,9 @@ export RALPH_AI_AGENT=gemini
 RALPH_AI_AGENT=gemini ./plans/ralph.sh 10
 ```
 
-Valid agents: `claude`, `gemini`
+Valid agents: `claude`, `gemini`, `codex`
+
+> **Note**: Claude and Gemini run in Docker sandbox. Codex runs directly from the host machine.
 
 The script will:
 1. Send the full backlog + recent history to the AI agent
@@ -208,7 +220,21 @@ exit
 | `Docker sandbox command not available` | Enable AI Sandboxes in Docker Desktop settings |
 | `Invalid API key` | Run `/login` in an interactive sandbox session for your selected agent |
 | Sandbox times out | Increase timeout in `ralph.sh` (default: 600s) |
-| Wrong agent selected | Use `RALPH_AI_AGENT=gemini` or `RALPH_AI_AGENT=claude` |
+| Wrong agent selected | Use `RALPH_AI_AGENT=gemini` or `RALPH_AI_AGENT=claude` or `RALPH_AI_AGENT=codex` |
+
+### Codex Setup
+
+Codex runs directly from your host machine (not in Docker sandbox). To set it up:
+
+1. **Install Codex CLI**: Follow instructions at [https://github.com/openai/codex](https://github.com/openai/codex)
+2. **Set API Key**:
+   ```bash
+   export OPENAI_API_KEY="your-api-key"
+   ```
+3. **Run with Codex**:
+   ```bash
+   RALPH_AI_AGENT=codex ./plans/ralph.sh 10
+   ```
 
 ## Project Structure
 
